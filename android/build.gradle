@@ -181,14 +181,12 @@ android {
     }
 }
 
-// androiddeployqt --release without --sign still looks for *-release-unsigned.apk.
-// Copy the debug-signed APK to that name so Qt Creator can install it.
+// androiddeployqt --release without --sign always installs *-release-unsigned.apk.
+// Gradle emits *-release.apk when any signingConfig is set (debug or upload),
+// so copy that artifact to the name Qt Creator expects. Bundle/AAB is unaffected.
 tasks.configureEach { task ->
     if (task.name == 'assembleRelease') {
         task.doLast {
-            if (!useDebugReleaseSigning) {
-                return
-            }
             def outDir = file("${buildDir}/outputs/apk/release")
             if (!outDir.exists()) {
                 return
