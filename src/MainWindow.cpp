@@ -38,6 +38,7 @@
 #include <QColor>
 #include <QDialog>
 #include <QEvent>
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QDebug>
 #include <QFileDialog>
@@ -67,6 +68,7 @@
 #include <QShowEvent>
 #include <QSizePolicy>
 #include <QSlider>
+#include <QStyle>
 #include <QStatusBar>
 #include <QTimer>
 #include <QtMath>
@@ -551,11 +553,12 @@ void MainWindow::buildAndroidLayout(QWidget *central, QVBoxLayout *rootLayout)
     a11yFont.setBold(true);
     m_accessibilityTitleLabel->setFont(a11yFont);
     m_accessibilityTitleLabel->setStyleSheet(QStringLiteral("color: #202124;"));
-    m_accessibilityBodyLabel = new QLabel(tr("The accessibility service must be enabled."),
-                                          m_accessibilityCard);
+    m_accessibilityBodyLabel = new QLabel(
+        tr("Review the disclosure, then enable the service to draw on other apps."),
+        m_accessibilityCard);
     m_accessibilityBodyLabel->setWordWrap(true);
     m_accessibilityBodyLabel->setStyleSheet(QStringLiteral("color: #6B6B6B;"));
-    m_enableAccessibilityButton = new QPushButton(tr("Enable service"), m_accessibilityCard);
+    m_enableAccessibilityButton = new QPushButton(tr("Review and enable"), m_accessibilityCard);
     m_enableAccessibilityButton->setStyleSheet(primaryButtonStyle());
     m_enableAccessibilityButton->setMinimumHeight(48);
     connect(m_enableAccessibilityButton, &QPushButton::clicked,
@@ -721,9 +724,10 @@ void MainWindow::retranslateUi()
     if (m_accessibilityTitleLabel)
         m_accessibilityTitleLabel->setText(tr("Access required"));
     if (m_accessibilityBodyLabel)
-        m_accessibilityBodyLabel->setText(tr("The accessibility service must be enabled."));
+        m_accessibilityBodyLabel->setText(
+            tr("Review the disclosure, then enable the service to draw on other apps."));
     if (m_enableAccessibilityButton)
-        m_enableAccessibilityButton->setText(tr("Enable service"));
+        m_enableAccessibilityButton->setText(tr("Review and enable"));
     if (m_accessibilityChip)
         m_accessibilityChip->setText(tr("Accessibility service active"));
     if (m_speedSlowButton)
@@ -749,6 +753,10 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
     const bool isBack = event->key() == Qt::Key_Back || event->key() == Qt::Key_Escape;
     if (isBack && m_overflowScrim) {
         dismissOverflowMenu();
+        return;
+    }
+    if (isBack && m_a11yDisclosureOverlay) {
+        dismissAccessibilityDisclosure();
         return;
     }
     if (isBack && m_aboutOverlay) {
@@ -788,6 +796,8 @@ void MainWindow::resizeEvent(QResizeEvent *event)
     }
     if (m_aboutOverlay)
         m_aboutOverlay->setGeometry(rect());
+    if (m_a11yDisclosureOverlay)
+        m_a11yDisclosureOverlay->setGeometry(rect());
     layoutOverflowMenu();
     updatePreviewHeightLimit();
     applyTopSafeInset();
@@ -836,6 +846,11 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             editSpeedValue();
             return true;
         }
+        if ((watched == m_a11yConsentLabel || watched == m_a11yConsentBox)
+            && m_a11yConsentCheck) {
+            m_a11yConsentCheck->toggle();
+            return true;
+        }
     }
     return QMainWindow::eventFilter(watched, event);
 }
@@ -882,6 +897,10 @@ void MainWindow::selectArea()
         if (m_extractor.isEmpty()) {
             QMessageBox::information(this, tr("Warning"),
                                      tr("Load an SVG before selecting the area."));
+            return;
+        }
+        if (!m_drawer->isBackendReady()) {
+            showAccessibilityDisclosure();
             return;
         }
 
@@ -1266,7 +1285,195 @@ void MainWindow::applySpeedPreset(int pixelsPerSecond)
 
 void MainWindow::enableAccessibility()
 {
+    if (!m_drawer->isBackendReady()) {
+        showAccessibilityDisclosure();
+        return;
+    }
     m_drawer->requestEnableBackend();
+}
+
+void MainWindow::showAccessibilityDisclosure()
+{
+#ifdef Q_OS_ANDROID
+    dismissAccessibilityDisclosure();
+    dismissAboutOverlay();
+
+    m_a11yDisclosureOverlay = new QWidget(this);
+    m_a11yDisclosureOverlay->setObjectName(QStringLiteral("a11yDisclosure"));
+    applyReadableAboutColors(m_a11yDisclosureOverlay);
+    m_a11yDisclosureOverlay->setStyleSheet(
+        QStringLiteral("#a11yDisclosure, #a11yDisclosure QScrollArea, "
+                       "#a11yDisclosure QScrollArea > QWidget, #a11yDisclosure QLabel {"
+                       "  background-color: #ffffff;"
+                       "  color: #111111;"
+                       "}"
+                       "#a11yDisclosure QLabel#a11yConsentBox {"
+                       "  background-color: #ffffff;"
+                       "  border: 2px solid #202124;"
+                       "  border-radius: 6px;"
+                       "  color: #ffffff;"
+                       "  font-weight: 700;"
+                       "}"
+                       "#a11yDisclosure QLabel#a11yConsentBox[checked=\"true\"] {"
+                       "  background-color: #008FD5;"
+                       "  border-color: #008FD5;"
+                       "}"
+                       "#a11yDisclosure QLabel#a11yConsentLabel {"
+                       "  background-color: transparent;"
+                       "  color: #111111;"
+                       "}"
+                       "#a11yDisclosure QPushButton {"
+                       "  border: none;"
+                       "  border-radius: 14px;"
+                       "  font-weight: 600;"
+                       "  padding: 14px 16px;"
+                       "}"
+                       "#a11yDisclosure QPushButton#a11yContinue {"
+                       "  background-color: #008FD5;"
+                       "  color: #ffffff;"
+                       "}"
+                       "#a11yDisclosure QPushButton#a11yContinue:disabled {"
+                       "  background-color: #C4C7C5;"
+                       "  color: #ffffff;"
+                       "}"
+                       "#a11yDisclosure QPushButton#a11yDecline {"
+                       "  background-color: #E8EAED;"
+                       "  color: #202124;"
+                       "}"));
+
+    auto *layout = new QVBoxLayout(m_a11yDisclosureOverlay);
+    layout->setContentsMargins(24, 24, 24, androidOverlayBottomInset(this));
+    layout->setSpacing(12);
+
+    auto *titleLabel = new QLabel(tr("Accessibility service disclosure"),
+                                  m_a11yDisclosureOverlay);
+    applyReadableAboutColors(titleLabel);
+    QFont titleFont = titleLabel->font();
+    titleFont.setPointSize(qMax(titleFont.pointSize() + 3, 18));
+    titleFont.setBold(true);
+    titleLabel->setFont(titleFont);
+    layout->addWidget(titleLabel);
+
+    const QString html = tr(
+        "<p>Autograph is <b>not</b> an accessibility tool for people with disabilities. "
+        "It uses Android’s Accessibility Service only to draw the SVG you opened, "
+        "inside the rectangle you select, on the app that is in front.</p>"
+        "<p><b>What Autograph can do with this permission</b></p>"
+        "<ul>"
+        "<li>Inject touch gestures that you start (select the area, draw, and stop).</li>"
+        "<li>Listen for window-state changes so the floating panel stays valid.</li>"
+        "<li>Use the volume keys to cancel a drawing in progress.</li>"
+        "</ul>"
+        "<p><b>What Autograph does not do</b></p>"
+        "<ul>"
+        "<li>It does not read the other app’s screen, text, or view tree.</li>"
+        "<li>It does not collect, store, or share Accessibility Service data with "
+        "Autograph’s developer or with advertisers.</li>"
+        "<li>It does not run unattended: every drawing starts only after you tap Draw.</li>"
+        "</ul>"
+        "<p>You can turn the service off at any time in Android Settings → Accessibility. "
+        "If you tap Don’t allow, Autograph will not open those settings and will not "
+        "draw on other apps.</p>");
+
+    auto *body = new QLabel(m_a11yDisclosureOverlay);
+    applyReadableAboutColors(body);
+    body->setWordWrap(true);
+    body->setTextFormat(Qt::RichText);
+    body->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    body->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    QFont bodyFont = body->font();
+    bodyFont.setPointSize(qMax(bodyFont.pointSize(), 15));
+    body->setFont(bodyFont);
+    body->setText(readableAboutHtml(html));
+
+    auto *scroll = new QScrollArea(m_a11yDisclosureOverlay);
+    applyReadableAboutColors(scroll);
+    applyReadableAboutColors(scroll->viewport());
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidget(body);
+    layout->addWidget(scroll, 1);
+
+    // QCheckBox text does not wrap on Android, and the native indicator is
+    // often an opaque square that never redraws. Keep a hidden QCheckBox for
+    // state and draw a wrapping label plus a custom box.
+    auto *consentRow = new QWidget(m_a11yDisclosureOverlay);
+    auto *consentLayout = new QHBoxLayout(consentRow);
+    consentLayout->setContentsMargins(0, 4, 0, 4);
+    consentLayout->setSpacing(12);
+    m_a11yConsentCheck = new QCheckBox(consentRow);
+    m_a11yConsentCheck->hide();
+    m_a11yConsentBox = new QLabel(consentRow);
+    m_a11yConsentBox->setObjectName(QStringLiteral("a11yConsentBox"));
+    m_a11yConsentBox->setAttribute(Qt::WA_StyledBackground, true);
+    m_a11yConsentBox->setFixedSize(28, 28);
+    m_a11yConsentBox->setAlignment(Qt::AlignCenter);
+    m_a11yConsentBox->setProperty("checked", false);
+    m_a11yConsentBox->installEventFilter(this);
+    m_a11yConsentLabel = new QLabel(
+        tr("I understand and agree to this use of the Accessibility Service."),
+        consentRow);
+    m_a11yConsentLabel->setObjectName(QStringLiteral("a11yConsentLabel"));
+    m_a11yConsentLabel->setWordWrap(true);
+    m_a11yConsentLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    m_a11yConsentLabel->installEventFilter(this);
+    consentLayout->addWidget(m_a11yConsentBox, 0, Qt::AlignTop);
+    consentLayout->addWidget(m_a11yConsentLabel, 1);
+    layout->addWidget(consentRow);
+
+    auto *buttons = new QHBoxLayout();
+    buttons->setSpacing(12);
+    auto *decline = new QPushButton(tr("Don’t allow"), m_a11yDisclosureOverlay);
+    decline->setObjectName(QStringLiteral("a11yDecline"));
+    decline->setMinimumHeight(52);
+    connect(decline, &QPushButton::clicked, this, &MainWindow::dismissAccessibilityDisclosure);
+    m_a11yContinueButton = new QPushButton(tr("Continue"), m_a11yDisclosureOverlay);
+    m_a11yContinueButton->setObjectName(QStringLiteral("a11yContinue"));
+    m_a11yContinueButton->setMinimumHeight(52);
+    m_a11yContinueButton->setEnabled(false);
+    connect(m_a11yContinueButton, &QPushButton::clicked,
+            this, &MainWindow::acceptAccessibilityDisclosure);
+    connect(m_a11yConsentCheck, &QCheckBox::toggled, this, [this](bool checked) {
+        if (m_a11yContinueButton)
+            m_a11yContinueButton->setEnabled(checked);
+        if (!m_a11yConsentBox)
+            return;
+        m_a11yConsentBox->setProperty("checked", checked);
+        m_a11yConsentBox->setText(checked ? QStringLiteral("✓") : QString());
+        m_a11yConsentBox->style()->unpolish(m_a11yConsentBox);
+        m_a11yConsentBox->style()->polish(m_a11yConsentBox);
+        m_a11yConsentBox->update();
+    });
+    buttons->addWidget(decline, 1);
+    buttons->addWidget(m_a11yContinueButton, 1);
+    layout->addLayout(buttons);
+
+    m_a11yDisclosureOverlay->setGeometry(rect());
+    m_a11yDisclosureOverlay->raise();
+    m_a11yDisclosureOverlay->show();
+#else
+    m_drawer->requestEnableBackend();
+#endif
+}
+
+void MainWindow::dismissAccessibilityDisclosure()
+{
+    if (!m_a11yDisclosureOverlay)
+        return;
+    m_a11yDisclosureOverlay->hide();
+    m_a11yDisclosureOverlay->deleteLater();
+    m_a11yDisclosureOverlay = nullptr;
+    m_a11yConsentCheck = nullptr;
+    m_a11yConsentBox = nullptr;
+    m_a11yConsentLabel = nullptr;
+    m_a11yContinueButton = nullptr;
+}
+
+void MainWindow::acceptAccessibilityDisclosure()
+{
+    dismissAccessibilityDisclosure();
+    if (m_drawer)
+        m_drawer->requestEnableBackend();
 }
 
 void MainWindow::onApplicationStateChanged(Qt::ApplicationState state)

@@ -11,5 +11,6 @@
     android:canRequestFilterKeyEvents="true"
     android:canRetrieveWindowContent="false"
     android:description="@string/accessibility_service_description"
+    android:isAccessibilityTool="false"
     android:notificationTimeout="100"
     android:settingsActivity="org.qtproject.qt.android.bindings.QtActivity" />

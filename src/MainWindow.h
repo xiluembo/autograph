@@ -27,6 +27,7 @@
 #include <QString>
 
 class QButtonGroup;
+class QCheckBox;
 class QCloseEvent;
 class QEvent;
 class QHideEvent;
@@ -77,6 +78,9 @@ private slots:
     void showAbout();
     void showAboutQt();
     void enableAccessibility();
+    void showAccessibilityDisclosure();
+    void dismissAccessibilityDisclosure();
+    void acceptAccessibilityDisclosure();
     void editSpeedValue();
     void applySpeedPreset(int pixelsPerSecond);
     void onSpeedSliderChanged(int pixelsPerSecond);
@@ -141,6 +145,11 @@ private:
     QLabel *m_accessibilityTitleLabel = nullptr;
     QLabel *m_accessibilityBodyLabel = nullptr;
     QWidget *m_aboutOverlay = nullptr;
+    QWidget *m_a11yDisclosureOverlay = nullptr;
+    QCheckBox *m_a11yConsentCheck = nullptr;
+    QLabel *m_a11yConsentBox = nullptr;
+    QLabel *m_a11yConsentLabel = nullptr;
+    QPushButton *m_a11yContinueButton = nullptr;
     QWidget *m_overflowScrim = nullptr;
     QWidget *m_overflowPanel = nullptr;
     QWidget *m_headerWidget = nullptr;

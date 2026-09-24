@@ -192,6 +192,34 @@ El archivo debe contener elementos como path, line, rect, circle, etc.</translat
         <translation>Activar servicio</translation>
     </message>
     <message>
+        <source>Review the disclosure, then enable the service to draw on other apps.</source>
+        <translation>Revisa el aviso y activa el servicio para dibujar en otras apps.</translation>
+    </message>
+    <message>
+        <source>Review and enable</source>
+        <translation>Revisar y activar</translation>
+    </message>
+    <message>
+        <source>Accessibility service disclosure</source>
+        <translation>Aviso del servicio de accesibilidad</translation>
+    </message>
+    <message>
+        <source>&lt;p&gt;Autograph is &lt;b&gt;not&lt;/b&gt; an accessibility tool for people with disabilities. It uses Android’s Accessibility Service only to draw the SVG you opened, inside the rectangle you select, on the app that is in front.&lt;/p&gt;&lt;p&gt;&lt;b&gt;What Autograph can do with this permission&lt;/b&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Inject touch gestures that you start (select the area, draw, and stop).&lt;/li&gt;&lt;li&gt;Listen for window-state changes so the floating panel stays valid.&lt;/li&gt;&lt;li&gt;Use the volume keys to cancel a drawing in progress.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;What Autograph does not do&lt;/b&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;It does not read the other app’s screen, text, or view tree.&lt;/li&gt;&lt;li&gt;It does not collect, store, or share Accessibility Service data with Autograph’s developer or with advertisers.&lt;/li&gt;&lt;li&gt;It does not run unattended: every drawing starts only after you tap Draw.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;You can turn the service off at any time in Android Settings → Accessibility. If you tap Don’t allow, Autograph will not open those settings and will not draw on other apps.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Autograph &lt;b&gt;no&lt;/b&gt; es una herramienta de accesibilidad para personas con discapacidad. Usa el servicio de accesibilidad de Android solo para dibujar el SVG que abriste, en el rectángulo que elijas, en la app que esté al frente.&lt;/p&gt;&lt;p&gt;&lt;b&gt;Qué puede hacer Autograph con este permiso&lt;/b&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Inyectar gestos táctiles que tú inicias (seleccionar el área, dibujar y detener).&lt;/li&gt;&lt;li&gt;Escuchar cambios de ventana para que el panel flotante siga siendo válido.&lt;/li&gt;&lt;li&gt;Usar las teclas de volumen para cancelar un dibujo en curso.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;&lt;b&gt;Qué no hace Autograph&lt;/b&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;No lee la pantalla, el texto ni el árbol de vistas de la otra app.&lt;/li&gt;&lt;li&gt;No recopila, guarda ni comparte datos del servicio de accesibilidad con el desarrollador de Autograph ni con anunciantes.&lt;/li&gt;&lt;li&gt;No funciona solo: cada dibujo empieza solo después de que tocas Dibujar.&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Puedes desactivar el servicio en cualquier momento en Ajustes → Accesibilidad. Si tocas No permitir, Autograph no abre esos ajustes y no dibuja en otras apps.&lt;/p&gt;</translation>
+    </message>
+    <message>
+        <source>I understand and agree to this use of the Accessibility Service.</source>
+        <translation>Entiendo y acepto este uso del servicio de accesibilidad.</translation>
+    </message>
+    <message>
+        <source>Don’t allow</source>
+        <translation>No permitir</translation>
+    </message>
+    <message>
+        <source>Continue</source>
+        <translation>Continuar</translation>
+    </message>
+    <message>
         <source>Start drawing</source>
         <translation>Iniciar dibujo</translation>
     </message>

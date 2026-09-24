@@ -96,7 +96,6 @@ void AndroidGestureDrawer::clearSelectedArea()
 bool AndroidGestureDrawer::requestAreaSelection()
 {
     if (!isBackendReady()) {
-        requestEnableBackend();
         emit error(tr("Enable the Autograph accessibility service and try again."));
         return false;
     }
@@ -130,7 +129,6 @@ bool AndroidGestureDrawer::requestReadyToDraw(const ArtPolylineSet &polylines,
     syncConfiguration(true);
 
     if (!isBackendReady()) {
-        requestEnableBackend();
         emit error(tr("Enable the Autograph accessibility service and try again."));
         return false;
     }
