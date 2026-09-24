@@ -33,11 +33,25 @@ def autografoAdmobBannerUnitId = autografoAds.getProperty(
         'admobBannerUnitId', 'ca-app-pub-3940256099942544/6300978111')
 def autografoAdmobTestDeviceIds = autografoAds.getProperty('admobTestDeviceIds', '')
 
-// Qt Creator release deploy installs *-release-unsigned.apk without --sign.
-// Modern Android rejects unsigned APKs (INSTALL_PARSE_FAILED_NO_CERTIFICATES).
-// Sign with the Android debug keystore unless Qt/androiddeployqt injects a real one.
+// Qt Creator "Sign package" injects android.injected.signing.* AND then
+// androiddeployqt --sign the same artifact. Two signers → Play Store rejects
+// the AAB ("more than one certificate chain"). For Play, leave Sign package
+// unchecked and put the upload keystore in keystore.properties (gitignored).
+def uploadKeystoreProps = new Properties()
+def uploadKeystorePropsFile = file('keystore.properties')
+if (uploadKeystorePropsFile.exists()) {
+    uploadKeystorePropsFile.withInputStream { uploadKeystoreProps.load(it) }
+}
+def hasUploadSigning = (uploadKeystoreProps.getProperty('storeFile') ?: '').trim()
+
+def taskNames = gradle.startParameter.taskNames.collect { it.toLowerCase() }
+def buildingBundle = taskNames.any { it.contains('bundle') }
+
+// Local APK deploy: debug keystore only when Gradle is not already signing
+// and we are not building an AAB for Play.
 def debugKeystoreFile = file("${System.getProperty('user.home')}/.android/debug.keystore")
-def useDebugReleaseSigning = !project.hasProperty('android.injected.signing.store.file')
+def useDebugReleaseSigning = !project.hasProperty('android.injected.signing.store.file') &&
+        !hasUploadSigning && !buildingBundle
 
 if (useDebugReleaseSigning && !debugKeystoreFile.exists()) {
     debugKeystoreFile.parentFile.mkdirs()
@@ -146,11 +160,21 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (hasUploadSigning) {
+            upload {
+                storeFile file(hasUploadSigning)
+                storePassword uploadKeystoreProps.getProperty('storePassword')
+                keyAlias uploadKeystoreProps.getProperty('keyAlias')
+                keyPassword uploadKeystoreProps.getProperty('keyPassword')
+            }
+        }
     }
 
     buildTypes {
         release {
-            if (useDebugReleaseSigning && debugKeystoreFile.exists()) {
+            if (hasUploadSigning) {
+                signingConfig signingConfigs.upload
+            } else if (useDebugReleaseSigning && debugKeystoreFile.exists()) {
                 signingConfig signingConfigs.debugFallback
             }
         }

@@ -59,7 +59,9 @@ cmake --build D:\b\autografo-a64
 
 The APK is produced by `androiddeployqt` in the build directory. Prefer a short build path such as `D:\b\autografo-a64`; Gradle on Windows can fail on long paths.
 
-Release packages need a signature or Android refuses to install them (`INSTALL_PARSE_FAILED_NO_CERTIFICATES`). For local Qt Creator deploys, Gradle signs with the Android **debug** keystore (`~/.android/debug.keystore`). For Play Store or a production device policy, configure your own keystore in Qt Creator (**Projects → Build Android APK → Sign package**).
+Release packages need a signature or Android refuses to install them (`INSTALL_PARSE_FAILED_NO_CERTIFICATES`). For local Qt Creator deploys, Gradle signs **APKs** with the Android **debug** keystore (`~/.android/debug.keystore`).
+
+For a Play Store **AAB**, do **not** enable **Sign package** in Qt Creator together with Gradle signing — `androiddeployqt` would sign the bundle a second time and Play rejects it (*more than one certificate chain*). Copy `android/keystore.properties.example` to `android/keystore.properties`, point it at your upload `.jks`, leave **Sign package** unchecked, enable **Build Android App Bundle**, and rebuild. The AAB is `android-build-autografo/build/outputs/bundle/release/*.aab`.
 
 By default the APK **does not include ads**. To show a small [AdMob](https://admob.google.com/) banner at the bottom of the main screen, configure CMake with `-DAUTOGRAFO_ENABLE_ADS=ON`. Until you have an AdMob account, the project uses Google’s official test IDs. For production, replace them with yours:
 
