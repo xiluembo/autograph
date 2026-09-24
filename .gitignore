@@ -1,0 +1,137 @@
+# Diretórios de build (CMake, Qt Creator, Ninja, Gradle)
+/build/
+/build-*/
+/out/
+/cmake-build-*/
+/android-build/
+android-package/
+
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+CMakeUserPresets.json
+cmake_install.cmake
+CTestTestfile.cmake
+CTestCustom.cmake
+install_manifest.txt
+Makefile
+compile_commands.json
+.ninja_deps
+.ninja_log
+*.ninja
+
+# Binários e objetos
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.map
+*.res
+
+# Qt: gerados pelo moc/uic/rcc e traduções compiladas
+# (mantenha translations/*.ts versionados)
+*.qm
+*.moc
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*_autogen/
+.qmake.stash
+.qmake.cache
+
+# Qt Creator / Qt
+.qt/
+.qtcreator/
+.qtc_clangd/
+CMakeLists.txt.user
+CMakeLists.txt.user.*
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+*.autosave
+
+# Android / Gradle (artefatos; android/ fonte permanece versionado)
+.gradle/
+local.properties
+*.apk
+*.aab
+*.ap_
+*.apks
+*.dex
+*.jks
+*.keystore
+*.keystore.properties
+captures/
+*.hprof
+.cxx/
+lint/
+lint-results*
+*.iml
+
+# Assinatura e IDs de produção
+google-services.json
+keystore.properties
+*.pem
+
+# Visual Studio / MSVC / CLion
+.vs/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.VC.opendb
+ipch/
+*.aps
+*.ncb
+*.opendb
+*.opensdf
+*.sdf
+*.cachefile
+*.vcxproj.user
+
+# clangd / caches de análise
+.cache/
+.clangd/
+compile_flags.txt
+
+# Testes e cobertura
+Testing/
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+
+# Python local (ex.: aqtinstall)
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Cursor / agentes
+.agents/
+
+# SO
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+*~
+*.swp
+*.swo
