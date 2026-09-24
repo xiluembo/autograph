@@ -1,4 +1,4 @@
-# Diretórios de build (CMake, Qt Creator, Ninja, Gradle)
+# Build directories (CMake, Qt Creator, Ninja, Gradle)
 /build/
 /build-*/
 /out/
@@ -20,7 +20,7 @@ compile_commands.json
 .ninja_log
 *.ninja
 
-# Binários e objetos
+# Binaries and object files
 *.o
 *.obj
 *.a
@@ -39,8 +39,8 @@ compile_commands.json
 *.map
 *.res
 
-# Qt: gerados pelo moc/uic/rcc e traduções compiladas
-# (mantenha translations/*.ts versionados)
+# Qt: moc/uic/rcc output and compiled translations
+# (keep translations/*.ts under version control)
 *.qm
 *.moc
 moc_*.cpp
@@ -63,7 +63,7 @@ CMakeLists.txt.user.*
 *.qbs.user.*
 *.autosave
 
-# Android / Gradle (artefatos; android/ fonte permanece versionado)
+# Android / Gradle artifacts (keep the android/ sources versioned)
 .gradle/
 local.properties
 *.apk
@@ -81,9 +81,10 @@ lint/
 lint-results*
 *.iml
 
-# Assinatura e IDs de produção
+# Signing material and production IDs
 google-services.json
 keystore.properties
+android/keystore.properties
 *.pem
 
 # Visual Studio / MSVC / CLion
@@ -104,12 +105,12 @@ ipch/
 *.cachefile
 *.vcxproj.user
 
-# clangd / caches de análise
+# clangd / analysis caches
 .cache/
 .clangd/
 compile_flags.txt
 
-# Testes e cobertura
+# Tests and coverage
 Testing/
 *.gcda
 *.gcno
@@ -117,16 +118,16 @@ Testing/
 *.profraw
 *.profdata
 
-# Python local (ex.: aqtinstall)
+# Local Python (e.g. aqtinstall)
 .venv/
 venv/
 __pycache__/
 *.pyc
 
-# Cursor / agentes
+# Cursor / agents
 .agents/
 
-# SO
+# OS
 Thumbs.db
 ehthumbs.db
 Desktop.ini
