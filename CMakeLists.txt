@@ -156,6 +156,8 @@ if(ANDROID)
         QT_ANDROID_APP_ICON "@mipmap/ic_launcher"
         QT_ANDROID_MIN_SDK_VERSION 31
         QT_ANDROID_TARGET_SDK_VERSION 36
+        QT_ANDROID_VERSION_CODE 2
+        QT_ANDROID_VERSION_NAME "1.0.1"
     )
 endif()
 
