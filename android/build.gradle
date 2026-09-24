@@ -1,0 +1,185 @@
+/*
+ * Autograph
+ * Copyright (C) 2026 Andrius da Costa Ribas <andriusmao@gmail.com>
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ */
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        //noinspection AndroidGradlePluginVersion
+        classpath 'com.android.tools.build:gradle:8.10.1'
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+apply plugin: qtGradlePluginType
+
+def autografoAds = new Properties()
+def autografoAdsFile = file('autografo-ads.properties')
+if (autografoAdsFile.exists()) {
+    autografoAdsFile.withInputStream { autografoAds.load(it) }
+}
+def autografoEnableAds = (autografoAds.getProperty('enable', 'false') ?: 'false').toBoolean()
+def autografoAdmobBannerUnitId = autografoAds.getProperty(
+        'admobBannerUnitId', 'ca-app-pub-3940256099942544/6300978111')
+def autografoAdmobTestDeviceIds = autografoAds.getProperty('admobTestDeviceIds', '')
+
+// Qt Creator release deploy installs *-release-unsigned.apk without --sign.
+// Modern Android rejects unsigned APKs (INSTALL_PARSE_FAILED_NO_CERTIFICATES).
+// Sign with the Android debug keystore unless Qt/androiddeployqt injects a real one.
+def debugKeystoreFile = file("${System.getProperty('user.home')}/.android/debug.keystore")
+def useDebugReleaseSigning = !project.hasProperty('android.injected.signing.store.file')
+
+if (useDebugReleaseSigning && !debugKeystoreFile.exists()) {
+    debugKeystoreFile.parentFile.mkdirs()
+    def javaHome = System.getenv('JAVA_HOME') ?: System.getProperty('java.home')
+    def keytoolName = System.getProperty('os.name').toLowerCase().contains('windows') ?
+            'keytool.exe' : 'keytool'
+    def keytool = new File(javaHome, "bin/${keytoolName}")
+    if (keytool.exists()) {
+        def proc = [
+            keytool.absolutePath,
+            '-genkeypair', '-keystore', debugKeystoreFile.absolutePath,
+            '-storepass', 'android', '-alias', 'androiddebugkey',
+            '-keypass', 'android', '-keyalg', 'RSA', '-keysize', '2048',
+            '-validity', '10000', '-dname', 'CN=Android Debug,O=Android,C=US'
+        ].execute()
+        proc.waitFor()
+    }
+}
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
+    //noinspection GradleDependency
+    implementation 'androidx.core:core:1.16.0'
+    if (autografoEnableAds) {
+        implementation 'com.google.android.gms:play-services-ads:24.7.0'
+        implementation 'androidx.browser:browser:1.8.0'
+    }
+}
+
+android {
+    /*******************************************************
+     * The following variables:
+     * - androidBuildToolsVersion,
+     * - androidCompileSdkVersion
+     * - qtAndroidDir - holds the path to qt android files
+     *                   needed to build any Qt application
+     *                   on Android.
+     * - qtGradlePluginType - whether to build an app or a library
+     *
+     * are defined in gradle.properties file. This file is
+     * updated by QtCreator and androiddeployqt tools.
+     * Changing them manually might break the compilation!
+     *******************************************************/
+
+    // androidPackageName comes from QT_ANDROID_PACKAGE_NAME (br.pushx.autograph).
+    // That is the Play Store application id. Java classes stay in
+    // com.autografo.android and import br.pushx.autograph.R.
+    namespace = androidPackageName
+    compileSdkVersion androidCompileSdkVersion
+    buildToolsVersion androidBuildToolsVersion
+    ndkVersion = androidNdkVersion
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = [qtAndroidDir + '/src', 'src', 'java']
+            if (autografoEnableAds) {
+                java.srcDirs += ['ads-src']
+            }
+            aidl.srcDirs = [qtAndroidDir + '/src', 'src', 'aidl']
+            res.srcDirs = [qtAndroidDir + '/res', 'res']
+            resources.srcDirs = ['resources']
+            renderscript.srcDirs = ['src']
+            assets.srcDirs = ['assets']
+            jniLibs.srcDirs = ['libs']
+       }
+    }
+
+    tasks.withType(JavaCompile) {
+        options.incremental = true
+        options.compilerArgs += ['-Xlint:all']
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lintOptions {
+        abortOnError = false
+    }
+
+    aaptOptions {
+        // Do not compress Qt binary resources file
+        noCompress 'rcc'
+    }
+
+    defaultConfig {
+        // Qt templates often keep only "en". That strips Java overlay strings in
+        // res/values-pt-rBR and res/values-es while C++ .qm translations still work.
+        resConfigs "en", "es", "pt", "pt-rBR"
+        applicationId "br.pushx.autograph"
+        minSdkVersion qtMinSdkVersion
+        targetSdkVersion qtTargetSdkVersion
+        ndk.abiFilters = qtTargetAbiList.split(",")
+        if (autografoEnableAds) {
+            resValue "string", "admob_banner_unit_id", autografoAdmobBannerUnitId
+            resValue "string", "admob_test_device_ids", autografoAdmobTestDeviceIds
+        }
+    }
+
+    signingConfigs {
+        debugFallback {
+            storeFile debugKeystoreFile
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        release {
+            if (useDebugReleaseSigning && debugKeystoreFile.exists()) {
+                signingConfig signingConfigs.debugFallback
+            }
+        }
+    }
+}
+
+// androiddeployqt --release without --sign still looks for *-release-unsigned.apk.
+// Copy the debug-signed APK to that name so Qt Creator can install it.
+tasks.configureEach { task ->
+    if (task.name == 'assembleRelease') {
+        task.doLast {
+            if (!useDebugReleaseSigning) {
+                return
+            }
+            def outDir = file("${buildDir}/outputs/apk/release")
+            if (!outDir.exists()) {
+                return
+            }
+            def signed = outDir.listFiles()?.find {
+                it.name.endsWith('-release.apk') && !it.name.contains('unsigned')
+            }
+            if (signed == null) {
+                return
+            }
+            def unsignedName = signed.name.replace('-release.apk', '-release-unsigned.apk')
+            java.nio.file.Files.copy(
+                    signed.toPath(),
+                    new File(outDir, unsignedName).toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+}

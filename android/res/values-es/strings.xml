@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Autograph
+  Copyright (C) 2026 Andrius da Costa Ribas <andriusmao@gmail.com>
+  SPDX-License-Identifier: LGPL-2.1-or-later
+-->
+<resources>
+    <string name="app_name">Autograph</string>
+    <string name="accessibility_service_name">Autograph — dibujo por gestos</string>
+    <string name="accessibility_service_description">Permite dibujar un SVG en la aplicación visible mediante gestos iniciados y controlados por el usuario.</string>
+    <string name="accessibility_interrupted">El servicio de accesibilidad se interrumpió.</string>
+    <string name="orientation_changed">La orientación cambió. Seleccione de nuevo el área de dibujo.</string>
+    <string name="open_target_app">Abra la aplicación de destino</string>
+    <string name="open_target_app_and_position">Ahora abra la aplicación donde desea dibujar y coloque el área</string>
+    <string name="open_target_then_start">Abra la aplicación de destino y toque Iniciar dibujo</string>
+    <string name="select_area">Seleccionar área</string>
+    <string name="confirm">Confirmar</string>
+    <string name="cancel">Cancelar</string>
+    <string name="return_to_autograph">Volver a Autograph</string>
+    <string name="start_drawing">Iniciar dibujo</string>
+    <string name="move_panel">Arrastre para mover</string>
+    <string name="could_not_fit_drawing">No se pudo ajustar el dibujo al área seleccionada.</string>
+    <string name="area_ready">Área lista</string>
+    <string name="area_size">%1$d × %2$d</string>
+    <string name="area_selected_size">Área seleccionada · %1$d × %2$d</string>
+    <string name="draw">Dibujar</string>
+    <string name="drawing">Dibujando…</string>
+    <string name="press_volume_to_stop">Pulse el volumen para detener</string>
+    <string name="stop">Detener</string>
+    <string name="select_area_again">Seleccione de nuevo el área de dibujo.</string>
+    <string name="drawing_has_no_valid_points">El dibujo no contiene puntos válidos.</string>
+    <string name="could_not_create_gestures">No se pudieron crear gestos para este dibujo.</string>
+    <string name="drawing_finished">Dibujo finalizado.</string>
+    <string name="gesture_interrupted">El gesto fue interrumpido por el sistema o por otro toque.</string>
+    <string name="gesture_rejected">Android rechazó el gesto. Compruebe el servicio de accesibilidad.</string>
+    <string name="drawing_progress">Dibujando %1$d/%2$d</string>
+    <string name="drag_to_select">Arrastre para seleccionar</string>
+    <string name="tap_inside_to_confirm">Toque dentro para confirmar</string>
+    <string name="tap_outside_to_redo">Toque fuera para rehacer • Atrás cancela</string>
+    <string name="accessibility_disconnected">El servicio de accesibilidad se desconectó.</string>
+</resources>

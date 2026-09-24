@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Autograph
+  Copyright (C) 2026 Andrius da Costa Ribas <andriusmao@gmail.com>
+  SPDX-License-Identifier: LGPL-2.1-or-later
+-->
+<resources>
+    <string name="app_name">Autograph</string>
+    <string name="accessibility_service_name">Autograph — gesture drawing</string>
+    <string name="accessibility_service_description">Allows drawing an SVG on the visible app using gestures started and controlled by the user.</string>
+    <string name="accessibility_interrupted">The accessibility service was interrupted.</string>
+    <string name="orientation_changed">Orientation changed. Select the drawing area again.</string>
+    <string name="open_target_app">Open the target app</string>
+    <string name="open_target_app_and_position">Now open the app where you want to draw and position the area</string>
+    <string name="open_target_then_start">Open the target app, then tap Start drawing</string>
+    <string name="select_area">Select area</string>
+    <string name="confirm">Confirm</string>
+    <string name="cancel">Cancel</string>
+    <string name="return_to_autograph">Return to Autograph</string>
+    <string name="start_drawing">Start drawing</string>
+    <string name="move_panel">Drag to move</string>
+    <string name="could_not_fit_drawing">Could not fit the drawing to the selected area.</string>
+    <string name="area_ready">Area ready</string>
+    <string name="area_size">%1$d × %2$d</string>
+    <string name="area_selected_size">Area selected · %1$d × %2$d</string>
+    <string name="draw">Draw</string>
+    <string name="drawing">Drawing…</string>
+    <string name="press_volume_to_stop">Press volume to stop</string>
+    <string name="stop">Stop</string>
+    <string name="select_area_again">Select the drawing area again.</string>
+    <string name="drawing_has_no_valid_points">The drawing does not contain valid points.</string>
+    <string name="could_not_create_gestures">Could not create gestures for this drawing.</string>
+    <string name="drawing_finished">Drawing finished.</string>
+    <string name="gesture_interrupted">The gesture was interrupted by the system or another touch.</string>
+    <string name="gesture_rejected">Android rejected the gesture. Check the accessibility service.</string>
+    <string name="drawing_progress">Drawing %1$d/%2$d</string>
+    <string name="drag_to_select">Drag to select</string>
+    <string name="tap_inside_to_confirm">Tap inside to confirm</string>
+    <string name="tap_outside_to_redo">Tap outside to redo • Back cancels</string>
+    <string name="accessibility_disconnected">The accessibility service was disconnected.</string>
+</resources>
