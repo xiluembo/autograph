@@ -172,6 +172,11 @@ android {
 
     buildTypes {
         release {
+            // R8 writes mapping.txt into the AAB (BUNDLE-METADATA), which
+            // Play uses to deobfuscate Java/Kotlin crashes and ANRs.
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                    'proguard-rules.pro'
             if (hasUploadSigning) {
                 signingConfig signingConfigs.upload
             } else if (useDebugReleaseSigning && debugKeystoreFile.exists()) {
