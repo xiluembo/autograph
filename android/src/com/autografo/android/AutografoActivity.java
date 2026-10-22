@@ -22,8 +22,6 @@ package com.autografo.android;
 import android.app.Activity;
 import android.content.Context;
 import android.content.res.Configuration;
-import android.graphics.Color;
-import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
@@ -121,28 +119,21 @@ public class AutografoActivity extends QtActivity {
     private static native void nativeLocaleChanged();
 
     /**
-     * Qt for Android often overrides theme status-bar flags. Force a light
-     * status bar (dark system icons) so icons stay readable on white UI.
+     * Qt for Android often overrides theme status-bar flags. Force dark
+     * system icons so they stay readable on the light UI. Do not call
+     * setStatusBarColor — deprecated on Android 15 and flagged by Play.
+     * Bar colors come from the theme (transparent) / Qt edge-to-edge.
      */
     private void applyLightStatusBar() {
         final Window window = getWindow();
         if (window == null)
             return;
 
-        window.setStatusBarColor(Color.WHITE);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            final WindowInsetsController controller = window.getInsetsController();
-            if (controller != null) {
-                controller.setSystemBarsAppearance(
-                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
-                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            final View decor = window.getDecorView();
-            int flags = decor.getSystemUiVisibility();
-            flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-            decor.setSystemUiVisibility(flags);
+        final WindowInsetsController controller = window.getInsetsController();
+        if (controller != null) {
+            controller.setSystemBarsAppearance(
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS);
         }
     }
 

@@ -9,9 +9,10 @@
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#008FD5</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
-        <item name="android:navigationBarColor">#1E1E1E</item>
-        <item name="android:statusBarColor">#FFFFFF</item>
-        <!-- Dark system icons on the light status bar -->
+        <!-- Transparent on API 35+ (opaque colors are ignored); Qt + insets
+             handle edge-to-edge. Keep light status-bar icons for white UI. -->
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>
