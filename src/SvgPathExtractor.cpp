@@ -22,41 +22,139 @@
 #include "ArtPathNormalizer.h"
 
 #include <QFile>
-#include <QLineF>
 #include <QPainterPath>
+#include <QPolygonF>
 #include <QRegularExpression>
+#include <QStringView>
 #include <QXmlStreamReader>
 #include <QtMath>
 
 namespace {
 
-constexpr double kMinSegmentLength = 0.5;
+// Reference size (in flattening space) used to derive an adaptive curve
+// tolerance. QPainterPath::toSubpathPolygons() flattens curves with a maximum
+// deviation of ~0.5 unit in the transformed space, so scaling the content to
+// this size keeps the deviation below ~0.025% of the largest dimension
+// regardless of the SVG coordinate scale. The polylines are normalized to the
+// 0..1 range afterwards, so the scale itself does not leak into the output.
+constexpr double kFlattenReferenceSize = 2048.0;
 
-QStringList tokenizePathData(const QString &data)
+// Allocation-free scanner for the SVG number grammar used by the "d",
+// "points" and "transform" attributes.
+class SvgNumberScanner
 {
-    QStringList tokens;
-    static const QRegularExpression tokenPattern(QStringLiteral(
-        R"(([AaCcHhLlMmQqSsTtVvZz])|([-+]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+))(?:[eE][-+]?\d+)?))"));
-
-    auto matches = tokenPattern.globalMatch(data);
-    while (matches.hasNext()) {
-        const QRegularExpressionMatch match = matches.next();
-        tokens.append(match.captured(0));
+public:
+    explicit SvgNumberScanner(QStringView text)
+        : m_pos(text.cbegin()), m_end(text.cend())
+    {
     }
-    return tokens;
-}
 
-QString styleProperty(const QXmlStreamAttributes &attrs, const QString &property)
+    bool atEnd()
+    {
+        skipSeparators();
+        return m_pos >= m_end;
+    }
+
+    // Returns the pending command letter, or a null QChar when the next token
+    // is not a letter.
+    QChar peekCommand()
+    {
+        skipSeparators();
+        if (m_pos < m_end && m_pos->isLetter())
+            return *m_pos;
+        return {};
+    }
+
+    void consumeChar()
+    {
+        if (m_pos < m_end)
+            ++m_pos;
+    }
+
+    bool readNumber(double &out)
+    {
+        skipSeparators();
+        const QChar *start = m_pos;
+        const QChar *p = m_pos;
+
+        if (p < m_end && (*p == QLatin1Char('+') || *p == QLatin1Char('-')))
+            ++p;
+
+        const QChar *digitsStart = p;
+        while (p < m_end && p->isDigit())
+            ++p;
+        if (p < m_end && *p == QLatin1Char('.')) {
+            ++p;
+            while (p < m_end && p->isDigit())
+                ++p;
+        }
+        // Reject empty mantissas ("", "+", "-", ".").
+        if (p == digitsStart || (p == digitsStart + 1 && *digitsStart == QLatin1Char('.')))
+            return false;
+
+        if (p < m_end && (*p == QLatin1Char('e') || *p == QLatin1Char('E'))) {
+            const QChar *exponentStart = p;
+            ++p;
+            if (p < m_end && (*p == QLatin1Char('+') || *p == QLatin1Char('-')))
+                ++p;
+            if (p < m_end && p->isDigit()) {
+                while (p < m_end && p->isDigit())
+                    ++p;
+            } else {
+                p = exponentStart; // not an exponent after all
+            }
+        }
+
+        bool ok = false;
+        out = QStringView(start, p - start).toDouble(&ok);
+        if (!ok)
+            return false;
+
+        m_pos = p;
+        return true;
+    }
+
+    // Arc flags are single '0'/'1' characters that may be glued to the next
+    // number (e.g. "a25 25 0 0150 25" means large-arc=0, sweep=1, x=50).
+    bool readFlag(bool &out)
+    {
+        skipSeparators();
+        if (m_pos < m_end && (*m_pos == QLatin1Char('0') || *m_pos == QLatin1Char('1'))) {
+            out = (*m_pos == QLatin1Char('1'));
+            ++m_pos;
+            return true;
+        }
+        double value = 0.0;
+        if (!readNumber(value))
+            return false;
+        out = !qFuzzyIsNull(value);
+        return true;
+    }
+
+private:
+    void skipSeparators()
+    {
+        while (m_pos < m_end && (m_pos->isSpace() || *m_pos == QLatin1Char(',')))
+            ++m_pos;
+    }
+
+    const QChar *m_pos;
+    const QChar *m_end;
+};
+
+QString styleProperty(const QXmlStreamAttributes &attrs, QLatin1String property)
 {
-    const QString style = attrs.value(QStringLiteral("style")).toString();
+    const QStringView style = attrs.value(QLatin1String("style"));
     if (!style.isEmpty()) {
-        const QRegularExpression pattern(
-            QStringLiteral(R"((?:^|;)\s*%1\s*:\s*([^;]+))")
-                .arg(QRegularExpression::escape(property)),
-            QRegularExpression::CaseInsensitiveOption);
-        const QRegularExpressionMatch match = pattern.match(style);
-        if (match.hasMatch())
-            return match.captured(1).trimmed();
+        const auto declarations = style.split(QLatin1Char(';'), Qt::SkipEmptyParts);
+        for (const QStringView &declaration : declarations) {
+            const qsizetype colon = declaration.indexOf(QLatin1Char(':'));
+            if (colon < 0)
+                continue;
+            const QStringView name = declaration.left(colon).trimmed();
+            if (name.compare(property, Qt::CaseInsensitive) == 0)
+                return declaration.mid(colon + 1).trimmed().toString();
+        }
     }
 
     return attrs.value(property).toString().trimmed();
@@ -64,9 +162,17 @@ QString styleProperty(const QXmlStreamAttributes &attrs, const QString &property
 
 bool isElementVisible(const QXmlStreamAttributes &attrs)
 {
-    const QString display = styleProperty(attrs, QStringLiteral("display")).toLower();
-    const QString visibility = styleProperty(attrs, QStringLiteral("visibility")).toLower();
-    const QString opacity = styleProperty(attrs, QStringLiteral("opacity"));
+    // Fast path: most elements carry none of the visibility attributes.
+    if (!attrs.hasAttribute(QLatin1String("style"))
+        && !attrs.hasAttribute(QLatin1String("display"))
+        && !attrs.hasAttribute(QLatin1String("visibility"))
+        && !attrs.hasAttribute(QLatin1String("opacity"))) {
+        return true;
+    }
+
+    const QString display = styleProperty(attrs, QLatin1String("display")).toLower();
+    const QString visibility = styleProperty(attrs, QLatin1String("visibility")).toLower();
+    const QString opacity = styleProperty(attrs, QLatin1String("opacity"));
 
     if (display == QLatin1String("none")
         || visibility == QLatin1String("hidden")
@@ -93,11 +199,15 @@ QTransform parseTransformAttribute(const QString &value)
     while (it.hasNext()) {
         const QRegularExpressionMatch match = it.next();
         const QString type = match.captured(1).toLower();
-        const QStringList args = match.captured(2).split(
-            QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
+
+        QVector<double> args;
+        SvgNumberScanner scanner(match.capturedView(2));
+        double number = 0.0;
+        while (scanner.readNumber(number))
+            args.append(number);
 
         auto num = [&](int index) -> double {
-            return index < args.size() ? args.at(index).toDouble() : 0.0;
+            return index < args.size() ? args.at(index) : 0.0;
         };
 
         if (type == QStringLiteral("matrix") && args.size() >= 6) {
@@ -128,74 +238,157 @@ QTransform parseTransformAttribute(const QString &value)
     return result;
 }
 
-QPainterPath parsePathData(const QString &data)
+// Converts an SVG elliptical arc (endpoint parameterization, spec section
+// F.6) into cubic Bezier segments appended to the path.
+void appendArcToPath(QPainterPath &path, const QPointF &start, double rx, double ry,
+                     double xAxisRotationDeg, bool largeArc, bool sweep, const QPointF &end)
+{
+    if (qFuzzyCompare(start.x(), end.x()) && qFuzzyCompare(start.y(), end.y()))
+        return;
+
+    rx = qAbs(rx);
+    ry = qAbs(ry);
+    if (rx < 1e-12 || ry < 1e-12) {
+        path.lineTo(end);
+        return;
+    }
+
+    const double phi = qDegreesToRadians(xAxisRotationDeg);
+    const double cosPhi = qCos(phi);
+    const double sinPhi = qSin(phi);
+
+    const double dx2 = (start.x() - end.x()) / 2.0;
+    const double dy2 = (start.y() - end.y()) / 2.0;
+    const double x1p = cosPhi * dx2 + sinPhi * dy2;
+    const double y1p = -sinPhi * dx2 + cosPhi * dy2;
+
+    // Correct out-of-range radii (F.6.6).
+    const double lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+    if (lambda > 1.0) {
+        const double s = qSqrt(lambda);
+        rx *= s;
+        ry *= s;
+    }
+
+    const double rx2 = rx * rx;
+    const double ry2 = ry * ry;
+    const double numerator = rx2 * ry2 - rx2 * y1p * y1p - ry2 * x1p * x1p;
+    const double denominator = rx2 * y1p * y1p + ry2 * x1p * x1p;
+    double coefficient = 0.0;
+    if (numerator > 0.0 && denominator > 0.0)
+        coefficient = qSqrt(numerator / denominator);
+    if (largeArc == sweep)
+        coefficient = -coefficient;
+
+    const double cxp = coefficient * rx * y1p / ry;
+    const double cyp = -coefficient * ry * x1p / rx;
+    const double cx = cosPhi * cxp - sinPhi * cyp + (start.x() + end.x()) / 2.0;
+    const double cy = sinPhi * cxp + cosPhi * cyp + (start.y() + end.y()) / 2.0;
+
+    const double theta1 = qAtan2((y1p - cyp) / ry, (x1p - cxp) / rx);
+    const double theta2 = qAtan2((-y1p - cyp) / ry, (-x1p - cxp) / rx);
+    double delta = theta2 - theta1;
+    if (!sweep && delta > 0.0)
+        delta -= 2.0 * M_PI;
+    else if (sweep && delta < 0.0)
+        delta += 2.0 * M_PI;
+
+    const auto pointAt = [&](double angle) {
+        const double c = qCos(angle);
+        const double s = qSin(angle);
+        return QPointF(cx + rx * c * cosPhi - ry * s * sinPhi,
+                       cy + rx * c * sinPhi + ry * s * cosPhi);
+    };
+    const auto derivativeAt = [&](double angle) {
+        const double c = qCos(angle);
+        const double s = qSin(angle);
+        return QPointF(-rx * s * cosPhi - ry * c * sinPhi,
+                       -rx * s * sinPhi + ry * c * cosPhi);
+    };
+
+    // Approximate each sweep of at most 90 degrees with one cubic segment.
+    const int segments = qMax(1, qCeil(qAbs(delta) / (M_PI / 2.0)));
+    const double deltaSegment = delta / segments;
+    const double kappa = (4.0 / 3.0) * qTan(deltaSegment / 4.0);
+
+    double theta = theta1;
+    QPointF from = start;
+    for (int i = 0; i < segments; ++i) {
+        const double next = theta + deltaSegment;
+        const QPointF to = (i == segments - 1) ? end : pointAt(next);
+        path.cubicTo(from + kappa * derivativeAt(theta),
+                     to - kappa * derivativeAt(next),
+                     to);
+        from = to;
+        theta = next;
+    }
+}
+
+QPainterPath parsePathData(QStringView data)
 {
     QPainterPath raw;
-    const QStringList tokens = tokenizePathData(data);
-    if (tokens.isEmpty())
-        return raw;
+    SvgNumberScanner scanner(data);
 
     QPointF current;
     QPointF subStart;
     QPointF lastCtrl;
     QChar lastCmd;
     QChar lastExecutedCmd;
-    int i = 0;
 
-    auto readNumber = [&]() -> double {
-        if (i >= tokens.size())
-            return 0.0;
-        bool ok = false;
-        const double value = tokens.at(i++).toDouble(&ok);
-        return ok ? value : 0.0;
+    const auto readPoint = [&scanner](QPointF &out) {
+        double x = 0.0;
+        double y = 0.0;
+        if (!scanner.readNumber(x) || !scanner.readNumber(y))
+            return false;
+        out = QPointF(x, y);
+        return true;
     };
 
-    auto isCommand = [](const QString &token) {
-        return token.size() == 1 && token.at(0).isLetter();
-    };
-
-    auto readPoint = [&]() {
-        const double x = readNumber();
-        const double y = readNumber();
-        return QPointF(x, y);
-    };
-
-    while (i < tokens.size()) {
-        QString token = tokens.at(i);
-        if (isCommand(token)) {
-            lastCmd = token.at(0);
-            ++i;
-        } else if (lastCmd == QChar()) {
-            ++i;
+    while (!scanner.atEnd()) {
+        const QChar commandChar = scanner.peekCommand();
+        if (!commandChar.isNull()) {
+            lastCmd = commandChar;
+            scanner.consumeChar();
+        } else if (lastCmd.isNull()) {
+            // Garbage before the first command; skip it.
+            scanner.consumeChar();
             continue;
         }
 
         const bool relative = lastCmd.isLower();
         const QChar cmd = lastCmd.toUpper();
+        bool parsed = true;
 
         switch (cmd.toLatin1()) {
         case 'M': {
-            const double x = readNumber();
-            const double y = readNumber();
-            current = relative ? current + QPointF(x, y) : QPointF(x, y);
+            QPointF p;
+            parsed = readPoint(p);
+            if (!parsed)
+                break;
+            current = relative ? current + p : p;
             subStart = current;
             lastCtrl = current;
             raw.moveTo(current);
-            if (i < tokens.size() && !isCommand(tokens.at(i)))
-                lastCmd = relative ? QChar('l') : QChar('L');
+            // Subsequent coordinate pairs are implicit linetos.
+            lastCmd = relative ? QChar('l') : QChar('L');
             break;
         }
         case 'L': {
-            const double x = readNumber();
-            const double y = readNumber();
-            const QPointF end = relative ? current + QPointF(x, y) : QPointF(x, y);
+            QPointF p;
+            parsed = readPoint(p);
+            if (!parsed)
+                break;
+            const QPointF end = relative ? current + p : p;
             raw.lineTo(end);
             current = end;
             lastCtrl = current;
             break;
         }
         case 'H': {
-            const double x = readNumber();
+            double x = 0.0;
+            parsed = scanner.readNumber(x);
+            if (!parsed)
+                break;
             const QPointF end(relative ? current.x() + x : x, current.y());
             raw.lineTo(end);
             current = end;
@@ -203,7 +396,10 @@ QPainterPath parsePathData(const QString &data)
             break;
         }
         case 'V': {
-            const double y = readNumber();
+            double y = 0.0;
+            parsed = scanner.readNumber(y);
+            if (!parsed)
+                break;
             const QPointF end(current.x(), relative ? current.y() + y : y);
             raw.lineTo(end);
             current = end;
@@ -211,9 +407,12 @@ QPainterPath parsePathData(const QString &data)
             break;
         }
         case 'C': {
-            QPointF c1 = readPoint();
-            QPointF c2 = readPoint();
-            QPointF end = readPoint();
+            QPointF c1;
+            QPointF c2;
+            QPointF end;
+            parsed = readPoint(c1) && readPoint(c2) && readPoint(end);
+            if (!parsed)
+                break;
             if (relative) {
                 c1 += current;
                 c2 += current;
@@ -225,8 +424,11 @@ QPainterPath parsePathData(const QString &data)
             break;
         }
         case 'S': {
-            QPointF c2 = readPoint();
-            QPointF end = readPoint();
+            QPointF c2;
+            QPointF end;
+            parsed = readPoint(c2) && readPoint(end);
+            if (!parsed)
+                break;
             if (relative) {
                 c2 += current;
                 end += current;
@@ -241,8 +443,11 @@ QPainterPath parsePathData(const QString &data)
             break;
         }
         case 'Q': {
-            QPointF c = readPoint();
-            QPointF end = readPoint();
+            QPointF c;
+            QPointF end;
+            parsed = readPoint(c) && readPoint(end);
+            if (!parsed)
+                break;
             if (relative) {
                 c += current;
                 end += current;
@@ -253,7 +458,10 @@ QPainterPath parsePathData(const QString &data)
             break;
         }
         case 'T': {
-            QPointF end = readPoint();
+            QPointF end;
+            parsed = readPoint(end);
+            if (!parsed)
+                break;
             if (relative)
                 end += current;
             const QPointF c = (lastExecutedCmd == QLatin1Char('Q')
@@ -266,15 +474,20 @@ QPainterPath parsePathData(const QString &data)
             break;
         }
         case 'A': {
-            readNumber();
-            readNumber();
-            readNumber();
-            readNumber();
-            readNumber();
-            QPointF end = readPoint();
+            double rx = 0.0;
+            double ry = 0.0;
+            double rotation = 0.0;
+            bool largeArc = false;
+            bool sweep = false;
+            QPointF end;
+            parsed = scanner.readNumber(rx) && scanner.readNumber(ry)
+                     && scanner.readNumber(rotation) && scanner.readFlag(largeArc)
+                     && scanner.readFlag(sweep) && readPoint(end);
+            if (!parsed)
+                break;
             if (relative)
                 end += current;
-            raw.lineTo(end);
+            appendArcToPath(raw, current, rx, ry, rotation, largeArc, sweep, end);
             current = end;
             lastCtrl = current;
             break;
@@ -283,12 +496,18 @@ QPainterPath parsePathData(const QString &data)
             raw.closeSubpath();
             current = subStart;
             lastCtrl = current;
+            // Numbers may not follow a closepath; require an explicit command.
+            lastCmd = QChar();
             break;
         }
         default:
-            ++i;
+            // Unknown command: ignore it and its parameters.
+            lastCmd = QChar();
             break;
         }
+
+        if (!parsed)
+            break; // malformed data; keep what was parsed so far
 
         lastExecutedCmd = cmd;
     }
@@ -296,85 +515,13 @@ QPainterPath parsePathData(const QString &data)
     return raw;
 }
 
-ArtPolyline sampleSubpath(const QPainterPath &subpath)
+void parsePointsAttribute(QStringView pointsData, ArtPolyline &out)
 {
-    ArtPolyline points;
-    if (subpath.isEmpty())
-        return points;
-
-    const double length = subpath.length();
-    if (length <= 0.0) {
-        points.append(subpath.pointAtPercent(0.0));
-        return points;
-    }
-
-    const int steps = qMax(2, static_cast<int>(length / kMinSegmentLength));
-    for (int s = 0; s <= steps; ++s) {
-        const double t = static_cast<double>(s) / steps;
-        const QPointF p = subpath.pointAtPercent(subpath.percentAtLength(t * length));
-        if (points.isEmpty() || QLineF(points.last(), p).length() > kMinSegmentLength)
-            points.append(p);
-    }
-
-    return points;
-}
-
-QVector<ArtPolyline> samplePathSubpaths(const QPainterPath &path)
-{
-    QVector<ArtPolyline> subpaths;
-    if (path.isEmpty())
-        return subpaths;
-
-    QPainterPath currentSubpath;
-    const int elementCount = path.elementCount();
-
-    auto flush = [&]() {
-        const ArtPolyline sampled = sampleSubpath(currentSubpath);
-        if (sampled.size() >= 2)
-            subpaths.append(sampled);
-        currentSubpath = QPainterPath();
-    };
-
-    for (int i = 0; i < elementCount; ++i) {
-        const QPainterPath::Element element = path.elementAt(i);
-        switch (element.type) {
-        case QPainterPath::MoveToElement:
-            flush();
-            currentSubpath.moveTo(element.x, element.y);
-            break;
-        case QPainterPath::LineToElement:
-            currentSubpath.lineTo(element.x, element.y);
-            break;
-        case QPainterPath::CurveToElement:
-            if (i + 2 < elementCount) {
-                const QPainterPath::Element c1 = path.elementAt(i);
-                const QPainterPath::Element c2 = path.elementAt(i + 1);
-                const QPainterPath::Element end = path.elementAt(i + 2);
-                currentSubpath.cubicTo(c1.x, c1.y, c2.x, c2.y, end.x, end.y);
-                i += 2;
-            }
-            break;
-        default:
-            break;
-        }
-    }
-    flush();
-
-    return subpaths;
-}
-
-void parsePointsAttribute(const QString &pointsData, ArtPolyline &out)
-{
-    const QStringList values = pointsData.split(QRegularExpression(QStringLiteral("[,\\s]+")),
-                                                Qt::SkipEmptyParts);
-    for (int i = 0; i + 1 < values.size(); i += 2) {
-        bool okX = false;
-        bool okY = false;
-        const double x = values.at(i).toDouble(&okX);
-        const double y = values.at(i + 1).toDouble(&okY);
-        if (okX && okY)
-            out.append(QPointF(x, y));
-    }
+    SvgNumberScanner scanner(pointsData);
+    double x = 0.0;
+    double y = 0.0;
+    while (scanner.readNumber(x) && scanner.readNumber(y))
+        out.append(QPointF(x, y));
 }
 
 QString hrefTarget(const QXmlStreamAttributes &attrs)
@@ -400,57 +547,89 @@ bool SvgPathExtractor::loadFromFile(const QString &filePath)
 bool SvgPathExtractor::loadFromData(const QByteArray &data)
 {
     m_polylines.clear();
+    m_paths.clear();
+    m_pendingUses.clear();
     m_defs.clear();
     m_groupPaths.clear();
     m_activeDefGroupIds.clear();
     m_fillRule = Qt::WindingFill;
 
-    if (!parseSvg(data, true))
+    if (!parseSvg(data))
         return false;
 
-    m_polylines.clear();
+    resolvePendingUses();
+    flattenPaths();
+
+    m_paths.clear();
+    m_defs.clear();
     m_groupPaths.clear();
-    m_activeDefGroupIds.clear();
-    if (!parseSvg(data, false))
-        return false;
 
     normalizeArtPolylines(m_polylines);
     return !m_polylines.isEmpty();
 }
 
-void SvgPathExtractor::appendPath(const QPainterPath &path)
+void SvgPathExtractor::resolvePendingUses()
 {
-    if (path.isEmpty())
+    // <use> elements that referenced ids defined later in the document.
+    for (const PendingUse &use : std::as_const(m_pendingUses)) {
+        QPainterPath path = m_defs.value(use.ref);
+        if (path.isEmpty())
+            path = m_groupPaths.value(use.ref);
+        if (!path.isEmpty())
+            m_paths.append(use.transform.map(path));
+    }
+    m_pendingUses.clear();
+}
+
+void SvgPathExtractor::flattenPaths()
+{
+    m_polylines.clear();
+    if (m_paths.isEmpty())
         return;
 
-    for (const ArtPolyline &sampled : samplePathSubpaths(path)) {
-        if (sampled.size() >= 2)
-            m_polylines.append(sampled);
+    QRectF bounds;
+    for (const QPainterPath &path : std::as_const(m_paths))
+        bounds = bounds.united(path.controlPointRect());
+
+    const double maxDimension = qMax(bounds.width(), bounds.height());
+    const double scale = maxDimension > 1e-12 ? kFlattenReferenceSize / maxDimension : 1.0;
+    const QTransform flattenTransform = QTransform::fromScale(scale, scale);
+
+    for (const QPainterPath &path : std::as_const(m_paths)) {
+        const QList<QPolygonF> polygons = path.toSubpathPolygons(flattenTransform);
+        for (const QPolygonF &polygon : polygons) {
+            ArtPolyline polyline;
+            polyline.reserve(polygon.size());
+            for (const QPointF &point : polygon) {
+                if (polyline.isEmpty() || polyline.last() != point)
+                    polyline.append(point);
+            }
+            if (polyline.size() >= 2)
+                m_polylines.append(polyline);
+        }
     }
 }
 
 void SvgPathExtractor::storeOrAppendPath(const QPainterPath &path, const QTransform &transform,
-                                         bool inDefs, const QString &id, bool defsOnly)
+                                         bool inDefs, const QString &id)
 {
     if (path.isEmpty())
         return;
 
     const QPainterPath mapped = transform.map(path);
 
-    if (inDefs && !m_activeDefGroupIds.isEmpty())
-        m_groupPaths[m_activeDefGroupIds.last()].addPath(mapped);
-
     if (inDefs) {
+        if (!m_activeDefGroupIds.isEmpty())
+            m_groupPaths[m_activeDefGroupIds.last()].addPath(mapped);
         if (!id.isEmpty())
             m_defs.insert(id, mapped);
         return;
     }
 
-    if (!defsOnly)
-        appendPath(mapped);
+    m_paths.append(mapped);
 }
 
-bool SvgPathExtractor::parseSvg(const QByteArray &data, bool defsOnly)
+bool SvgPathExtractor::parseSvg(const QByteArray &data)
 {
     QVector<QTransform> transformStack;
     transformStack.append(QTransform());
@@ -471,7 +650,7 @@ bool SvgPathExtractor::parseSvg(const QByteArray &data, bool defsOnly)
         reader.readNext();
 
         if (reader.isStartElement()) {
-            const QString name = reader.name().toString();
+            const QStringView name = reader.name();
             const auto attrs = reader.attributes();
             const bool inDefs = defsDepth > 0;
             const bool visible = visibilityStack.last() && isElementVisible(attrs);
@@ -496,24 +675,27 @@ bool SvgPathExtractor::parseSvg(const QByteArray &data, bool defsOnly)
                 ++defsDepth;
             }
 
+            const bool processElement = inDefs || visible;
+            if (!processElement)
+                continue;
+
             const QTransform current = transformStack.last();
             const QTransform elementTransform = parseTransformAttribute(
                                                     attrs.value(QStringLiteral("transform")).toString())
                                                 * current;
-            const bool processElement = inDefs || visible;
 
-            if (name == QLatin1String("path") && processElement) {
+            if (name == QLatin1String("path")) {
                 const QString d = attrs.value(QStringLiteral("d")).toString();
                 const QString id = attrs.value(QStringLiteral("id")).toString();
 
-                if (!defsOnly && !inDefs) {
-                    const QString fillRule = styleProperty(attrs, QStringLiteral("fill-rule")).toLower();
+                if (!inDefs) {
+                    const QString fillRule = styleProperty(attrs, QLatin1String("fill-rule")).toLower();
                     if (fillRule == QLatin1String("evenodd"))
                         m_fillRule = Qt::OddEvenFill;
                 }
 
-                storeOrAppendPath(parsePathData(d), elementTransform, inDefs, id, defsOnly);
-            } else if (name == QLatin1String("line") && processElement) {
+                storeOrAppendPath(parsePathData(d), elementTransform, inDefs, id);
+            } else if (name == QLatin1String("line")) {
                 QPainterPath linePath;
                 const double x1 = attrs.value(QStringLiteral("x1")).toDouble();
                 const double y1 = attrs.value(QStringLiteral("y1")).toDouble();
@@ -522,11 +704,10 @@ bool SvgPathExtractor::parseSvg(const QByteArray &data, bool defsOnly)
                 linePath.moveTo(x1, y1);
                 linePath.lineTo(x2, y2);
                 storeOrAppendPath(linePath, elementTransform, inDefs,
-                                  attrs.value(QStringLiteral("id")).toString(), defsOnly);
-            } else if ((name == QLatin1String("polyline") || name == QLatin1String("polygon"))
-                       && processElement) {
+                                  attrs.value(QStringLiteral("id")).toString());
+            } else if (name == QLatin1String("polyline") || name == QLatin1String("polygon")) {
                 ArtPolyline points;
-                parsePointsAttribute(attrs.value(QStringLiteral("points")).toString(), points);
+                parsePointsAttribute(attrs.value(QStringLiteral("points")), points);
                 if (points.size() >= 2) {
                     QPainterPath polyPath;
                     polyPath.moveTo(points.first());
@@ -535,9 +716,9 @@ bool SvgPathExtractor::parseSvg(const QByteArray &data, bool defsOnly)
                     if (name == QLatin1String("polygon"))
                         polyPath.closeSubpath();
                     storeOrAppendPath(polyPath, elementTransform, inDefs,
-                                      attrs.value(QStringLiteral("id")).toString(), defsOnly);
+                                      attrs.value(QStringLiteral("id")).toString());
                 }
-            } else if (name == QLatin1String("rect") && processElement) {
+            } else if (name == QLatin1String("rect")) {
                 const double x = attrs.value(QStringLiteral("x")).toDouble();
                 const double y = attrs.value(QStringLiteral("y")).toDouble();
                 const double w = attrs.value(QStringLiteral("width")).toDouble();
@@ -545,16 +726,16 @@ bool SvgPathExtractor::parseSvg(const QByteArray &data, bool defsOnly)
                 QPainterPath rectPath;
                 rectPath.addRect(x, y, w, h);
                 storeOrAppendPath(rectPath, elementTransform, inDefs,
-                                  attrs.value(QStringLiteral("id")).toString(), defsOnly);
-            } else if (name == QLatin1String("circle") && processElement) {
+                                  attrs.value(QStringLiteral("id")).toString());
+            } else if (name == QLatin1String("circle")) {
                 const double cx = attrs.value(QStringLiteral("cx")).toDouble();
                 const double cy = attrs.value(QStringLiteral("cy")).toDouble();
                 const double r = attrs.value(QStringLiteral("r")).toDouble();
                 QPainterPath circlePath;
                 circlePath.addEllipse(QPointF(cx, cy), r, r);
                 storeOrAppendPath(circlePath, elementTransform, inDefs,
-                                  attrs.value(QStringLiteral("id")).toString(), defsOnly);
-            } else if (name == QLatin1String("ellipse") && processElement) {
+                                  attrs.value(QStringLiteral("id")).toString());
+            } else if (name == QLatin1String("ellipse")) {
                 const double cx = attrs.value(QStringLiteral("cx")).toDouble();
                 const double cy = attrs.value(QStringLiteral("cy")).toDouble();
                 const double rx = attrs.value(QStringLiteral("rx")).toDouble();
@@ -562,25 +743,27 @@ bool SvgPathExtractor::parseSvg(const QByteArray &data, bool defsOnly)
                 QPainterPath ellipsePath;
                 ellipsePath.addEllipse(QPointF(cx, cy), rx, ry);
                 storeOrAppendPath(ellipsePath, elementTransform, inDefs,
-                                  attrs.value(QStringLiteral("id")).toString(), defsOnly);
-            } else if (name == QLatin1String("use") && !inDefs && !defsOnly && visible) {
+                                  attrs.value(QStringLiteral("id")).toString());
+            } else if (name == QLatin1String("use") && !inDefs && visible) {
                 const QString ref = hrefTarget(attrs);
-                QPainterPath usedPath;
-                if (m_defs.contains(ref))
-                    usedPath = m_defs.value(ref);
-                else if (m_groupPaths.contains(ref))
-                    usedPath = m_groupPaths.value(ref);
-
-                if (!usedPath.isEmpty()) {
+                if (!ref.isEmpty()) {
                     const double x = attrs.value(QStringLiteral("x")).toDouble();
                     const double y = attrs.value(QStringLiteral("y")).toDouble();
                     const QTransform useTransform = QTransform::fromTranslate(x, y)
                                                     * elementTransform;
-                    appendPath(useTransform.map(usedPath));
+
+                    QPainterPath usedPath = m_defs.value(ref);
+                    if (usedPath.isEmpty())
+                        usedPath = m_groupPaths.value(ref);
+
+                    if (!usedPath.isEmpty())
+                        m_paths.append(useTransform.map(usedPath));
+                    else
+                        m_pendingUses.append({ref, useTransform}); // forward reference
                 }
             }
         } else if (reader.isEndElement()) {
-            const QString name = reader.name().toString();
+            const QStringView name = reader.name();
 
             if (name == QLatin1String("g") || name == QLatin1String("svg")
                 || name == QLatin1String("a")) {

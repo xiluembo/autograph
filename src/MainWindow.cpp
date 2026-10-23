@@ -41,8 +41,11 @@
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QDebug>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
 #include <QFont>
 #include <QFontMetrics>
 #include <QFrame>
@@ -72,6 +75,8 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QtMath>
+
+#include <memory>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -857,6 +862,9 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 
 void MainWindow::openSvg()
 {
+    if (m_svgLoading)
+        return;
+
 #ifdef Q_OS_ANDROID
     QFileDialog dialog(this, tr("Open SVG"));
     dialog.setFileMode(QFileDialog::ExistingFile);
@@ -876,19 +884,59 @@ void MainWindow::openSvg()
         return;
 #endif
 
-    if (!m_extractor.loadFromFile(path)) {
+    // Read the bytes on the UI thread (fast, and content:// URIs on Android
+    // are safest here); parse them on a worker thread so the UI stays
+    // responsive while large files load.
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
         QMessageBox::warning(this, tr("Error"),
                              tr("Could not load the SVG or extract vector paths.\n"
                                 "The file must contain elements such as path, line, rect, circle, and so on."));
         return;
     }
+    const QByteArray data = file.readAll();
+    file.close();
 
-    m_loadedFileName = QFileInfo(path).fileName();
-    clearAreaSelection();
-    m_preview->setPolylines(m_extractor.polylines(), m_extractor.fillRule());
-    updatePreviewHeightLimit();
-    updateStatus();
-    syncFlowUi();
+    m_svgLoading = true;
+    if (m_openButton)
+        m_openButton->setEnabled(false);
+    if (m_preview)
+        m_preview->setLoading(true);
+    if (m_statusLabel)
+        m_statusLabel->setText(tr("Loading SVG..."));
+
+    auto extractor = std::make_shared<SvgPathExtractor>();
+    auto *watcher = new QFutureWatcher<bool>(this);
+    connect(watcher, &QFutureWatcher<bool>::finished, this,
+            [this, watcher, extractor, path]() {
+        watcher->deleteLater();
+        const bool ok = watcher->result();
+
+        m_svgLoading = false;
+        if (m_openButton)
+            m_openButton->setEnabled(true);
+        if (m_preview)
+            m_preview->setLoading(false);
+
+        if (!ok) {
+            updateStatus();
+            QMessageBox::warning(this, tr("Error"),
+                                 tr("Could not load the SVG or extract vector paths.\n"
+                                    "The file must contain elements such as path, line, rect, circle, and so on."));
+            return;
+        }
+
+        m_extractor = std::move(*extractor);
+        m_loadedFileName = QFileInfo(path).fileName();
+        clearAreaSelection();
+        m_preview->setPolylines(m_extractor.polylines(), m_extractor.fillRule());
+        updatePreviewHeightLimit();
+        updateStatus();
+        syncFlowUi();
+    });
+    watcher->setFuture(QtConcurrent::run([extractor, data]() {
+        return extractor->loadFromData(data);
+    }));
 }
 
 void MainWindow::selectArea()

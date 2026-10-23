@@ -40,7 +40,30 @@ MouseDrawer::MouseDrawer(QObject *parent)
 
 void MouseDrawer::setPolylines(const ArtPolylineSet &polylines)
 {
-    m_polylines = polylines;
+    // The extractor emits adaptively flattened polylines, so straight runs can
+    // be a single long segment. Subdivide them to keep the injected cursor
+    // motion smooth instead of jumping between distant points.
+    constexpr double kMaxSegmentLengthPx = 4.0;
+
+    m_polylines.clear();
+    m_polylines.reserve(polylines.size());
+    for (const ArtPolyline &line : polylines) {
+        ArtPolyline dense;
+        dense.reserve(line.size());
+        for (const QPointF &point : line) {
+            if (!dense.isEmpty()) {
+                const QPointF previous = dense.last();
+                const double length = QLineF(previous, point).length();
+                const int extraPoints = static_cast<int>(length / kMaxSegmentLengthPx);
+                for (int s = 1; s <= extraPoints; ++s) {
+                    const double t = static_cast<double>(s) / (extraPoints + 1);
+                    dense.append(previous + t * (point - previous));
+                }
+            }
+            dense.append(point);
+        }
+        m_polylines.append(dense);
+    }
 }
 
 void MouseDrawer::setSpeed(int pixelsPerSecond)

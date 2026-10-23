@@ -24,10 +24,15 @@
 #include <QEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPen>
+#include <QResizeEvent>
 #include <QSize>
+#include <QTimer>
 
 namespace {
 constexpr QColor kCanvasColor(0x17, 0x17, 0x17);
+constexpr int kSpinnerIntervalMs = 33;
+constexpr int kSpinnerStepDegrees = 10;
 }
 
 PathPreviewWidget::PathPreviewWidget(QWidget *parent)
@@ -35,12 +40,22 @@ PathPreviewWidget::PathPreviewWidget(QWidget *parent)
 {
     setMinimumSize(240, 120);
     setAttribute(Qt::WA_OpaquePaintEvent, true);
+
+    m_spinnerTimer = new QTimer(this);
+    m_spinnerTimer->setInterval(kSpinnerIntervalMs);
+    connect(m_spinnerTimer, &QTimer::timeout, this, [this]() {
+        m_spinnerAngle = (m_spinnerAngle + kSpinnerStepDegrees) % 360;
+        update();
+    });
 }
 
 void PathPreviewWidget::setPolylines(const ArtPolylineSet &polylines, Qt::FillRule fillRule)
 {
     m_polylines = polylines;
     m_fillRule = fillRule;
+    m_contentBounds = artPolylineBounds(m_polylines);
+    m_shapeDirty = true;
+    setLoading(false);
     fitToView();
     updateGeometry();
     update();
@@ -50,6 +65,9 @@ void PathPreviewWidget::clearPolylines()
 {
     m_polylines.clear();
     m_fillRule = Qt::WindingFill;
+    m_contentBounds = QRectF();
+    m_shape = QPainterPath();
+    m_shapeDirty = true;
     fitToView();
     updateGeometry();
     update();
@@ -57,6 +75,19 @@ void PathPreviewWidget::clearPolylines()
 
 void PathPreviewWidget::fitToView()
 {
+    update();
+}
+
+void PathPreviewWidget::setLoading(bool loading)
+{
+    if (m_loading == loading)
+        return;
+    m_loading = loading;
+    m_spinnerAngle = 0;
+    if (m_loading)
+        m_spinnerTimer->start();
+    else
+        m_spinnerTimer->stop();
     update();
 }
 
@@ -106,8 +137,22 @@ QRectF PathPreviewWidget::fittedContentRect() const
     const QRectF target(margin, margin,
                         width() - 2 * margin,
                         height() - 2 * margin);
-    const QRectF content = artPolylineBounds(m_polylines);
-    return fitRectForContent(content, target);
+    return fitRectForContent(m_contentBounds, target);
+}
+
+void PathPreviewWidget::resizeEvent(QResizeEvent *event)
+{
+    m_shapeDirty = true;
+    QWidget::resizeEvent(event);
+}
+
+void PathPreviewWidget::rebuildShapeIfNeeded()
+{
+    if (!m_shapeDirty)
+        return;
+    m_shape = polylinesToPainterPath(m_polylines, m_contentBounds, fittedContentRect());
+    m_shape.setFillRule(m_fillRule);
+    m_shapeDirty = false;
 }
 
 void PathPreviewWidget::paintEvent(QPaintEvent *event)
@@ -126,6 +171,25 @@ void PathPreviewWidget::paintEvent(QPaintEvent *event)
     painter.setClipPath(clip);
     painter.fillPath(clip, kCanvasColor);
 
+    if (m_loading) {
+        const double radius = qMin(width(), height()) / 6.0;
+        const QRectF spinnerRect(width() / 2.0 - radius,
+                                 height() / 2.0 - radius - 10.0,
+                                 radius * 2.0, radius * 2.0);
+        QPen pen(QColor(0x9a, 0x9a, 0x9a), 3.0);
+        pen.setCapStyle(Qt::RoundCap);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawArc(spinnerRect, -m_spinnerAngle * 16, 120 * 16);
+
+        painter.setPen(QColor(0x9a, 0x9a, 0x9a));
+        painter.drawText(QRectF(16.0, spinnerRect.bottom() + 8.0,
+                                width() - 32.0, height() - spinnerRect.bottom() - 8.0),
+                         Qt::AlignHCenter | Qt::AlignTop | Qt::TextWordWrap,
+                         tr("Loading SVG..."));
+        return;
+    }
+
     if (m_polylines.isEmpty()) {
         painter.setPen(QColor(0x9a, 0x9a, 0x9a));
         painter.drawText(rect().adjusted(16, 12, -16, -12), Qt::AlignCenter | Qt::TextWordWrap,
@@ -133,12 +197,9 @@ void PathPreviewWidget::paintEvent(QPaintEvent *event)
         return;
     }
 
-    const QRectF content = artPolylineBounds(m_polylines);
-    const QRectF fitRect = fittedContentRect();
-    QPainterPath shape = polylinesToPainterPath(m_polylines, content, fitRect);
-    shape.setFillRule(m_fillRule);
+    rebuildShapeIfNeeded();
 
     painter.setPen(QPen(QColor(80, 80, 80), 1.0));
     painter.setBrush(QColor(220, 220, 220));
-    painter.drawPath(shape);
+    painter.drawPath(m_shape);
 }

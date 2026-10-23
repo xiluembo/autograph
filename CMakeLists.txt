@@ -35,7 +35,7 @@ set(AUTOGRAFO_ADMOB_BANNER_UNIT_ID "ca-app-pub-3940256099942544/6300978111" CACH
 set(AUTOGRAFO_ADMOB_TEST_DEVICE_IDS "" CACHE STRING
     "Comma-separated AdMob test device IDs (development builds); test devices always receive test ads")
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Svg)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Concurrent)
 
 # lupdate/lrelease ship with desktop (host) kits, not with Qt for Android.
 if(ANDROID AND QT_HOST_PATH)
@@ -88,7 +88,7 @@ autografo_setup_app_icon(autografo
     SVG "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/autografo.svg"
 )
 
-target_link_libraries(autografo PRIVATE Qt6::Widgets Qt6::Svg)
+target_link_libraries(autografo PRIVATE Qt6::Widgets Qt6::Svg Qt6::Concurrent)
 
 if(WIN32)
     target_link_libraries(autografo PRIVATE user32)

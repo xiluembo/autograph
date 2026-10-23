@@ -169,6 +169,7 @@ private:
 
     QString m_loadedFileName;
     QRect m_targetArea;
+    bool m_svgLoading = false;
     bool m_hasArea = false;
     bool m_androidUi = false;
     bool m_drawingUiActive = false;

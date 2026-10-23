@@ -42,13 +42,22 @@ public:
     bool isEmpty() const { return m_polylines.isEmpty(); }
 
 private:
-    bool parseSvg(const QByteArray &data, bool defsOnly);
-    void appendPath(const QPainterPath &path);
+    struct PendingUse
+    {
+        QString ref;
+        QTransform transform;
+    };
+
+    bool parseSvg(const QByteArray &data);
+    void resolvePendingUses();
+    void flattenPaths();
     void storeOrAppendPath(const QPainterPath &path, const QTransform &transform,
-                           bool inDefs, const QString &id, bool defsOnly);
+                           bool inDefs, const QString &id);
 
     ArtPolylineSet m_polylines;
     Qt::FillRule m_fillRule = Qt::WindingFill;
+    QVector<QPainterPath> m_paths;
+    QVector<PendingUse> m_pendingUses;
     QHash<QString, QPainterPath> m_defs;
     QHash<QString, QPainterPath> m_groupPaths;
     QVector<QString> m_activeDefGroupIds;
