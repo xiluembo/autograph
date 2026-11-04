@@ -36,8 +36,10 @@ int main(int argc, char *argv[])
 #ifdef Q_OS_ANDROID
     // Overlay workflows hide the window; do not quit the process when that happens.
     app.setQuitOnLastWindowClosed(false);
-#endif
+    window.showMaximized();
+#else
     window.show();
+#endif
 
     return app.exec();
 }
