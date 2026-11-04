@@ -88,6 +88,9 @@ private slots:
     void updateAndroidChrome();
 
 private:
+    friend class MainWindowLayoutTests;
+    MainWindow(QWidget *parent, bool androidUi);
+    void scheduleAndroidLayoutUpdate();
     void buildDesktopLayout(QWidget *central, QVBoxLayout *layout);
     void buildAndroidLayout(QWidget *central, QVBoxLayout *layout);
     void setDrawingUiActive(bool active);
@@ -103,7 +106,7 @@ private:
     void updateSpeedLabel(int pixelsPerSecond);
     void updateSpeedSegmentSelection(int pixelsPerSecond);
     void updatePreviewHeightLimit();
-    void applyAndroidOrientationLayout();
+    void applyAndroidOrientationLayout(const QSize &availableSize);
     void updateFileRowText();
     void updateStepperVisual(bool hasSvg, bool hasArea);
     void retranslateUi();
@@ -166,6 +169,7 @@ private:
     QWidget *m_speedSegment = nullptr;
     QWidget *m_footerWidget = nullptr;
     bool m_androidLandscape = false;
+    bool m_androidLayoutUpdatePending = false;
 
     QString m_loadedFileName;
     QRect m_targetArea;

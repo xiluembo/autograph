@@ -177,4 +177,21 @@ if(BUILD_TESTING)
     set_target_properties(autografo_tests PROPERTIES WIN32_EXECUTABLE FALSE)
 
     add_test(NAME autografo_geometry COMMAND autografo_tests)
+
+    if(NOT ANDROID)
+        set(_layout_test_sources ${SOURCES})
+        list(REMOVE_ITEM _layout_test_sources src/main.cpp)
+        qt_add_executable(autografo_layout_tests
+            tests/MainWindowLayoutTests.cpp ${_layout_test_sources} ${HEADERS})
+        target_include_directories(autografo_layout_tests PRIVATE src)
+        target_link_libraries(autografo_layout_tests PRIVATE
+            Qt6::Widgets Qt6::Svg Qt6::Concurrent)
+        if(WIN32)
+            target_link_libraries(autografo_layout_tests PRIVATE user32)
+        endif()
+        set_target_properties(autografo_layout_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+        add_test(NAME autografo_mobile_layout COMMAND autografo_layout_tests)
+        set_tests_properties(autografo_mobile_layout PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
 endif()

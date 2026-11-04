@@ -257,11 +257,21 @@ QString segmentedFrameStyle()
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent)
+    : MainWindow(parent,
+#ifdef Q_OS_ANDROID
+                 true
+#else
+                 false
+#endif
+                 )
+{
+}
+
+MainWindow::MainWindow(QWidget *parent, bool androidUi)
+    : QMainWindow(parent), m_androidUi(androidUi)
 {
     setWindowTitle(tr("Autograph — SVG Line-Art"));
 #ifdef Q_OS_ANDROID
-    m_androidUi = true;
 #ifdef AUTOGRAFO_ENABLE_ADS
     s_adsChromeWindow = this;
 #endif
@@ -301,6 +311,14 @@ MainWindow::MainWindow(QWidget *parent)
         buildDesktopLayout(central, layout);
 
     setCentralWidget(central);
+    if (m_androidUi) {
+        // Android owns the window bounds. A temporary landscape layout must
+        // never publish a minimum window size wider than the native surface.
+        this->layout()->setSizeConstraint(QLayout::SetNoConstraint);
+        layout->setSizeConstraint(QLayout::SetNoConstraint);
+        central->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+        central->installEventFilter(this);
+    }
 
     if (!m_androidUi) {
         m_statusLabel = new QLabel(central);
@@ -315,10 +333,6 @@ MainWindow::MainWindow(QWidget *parent)
     setDrawingUiActive(false);
     updateStatus();
     syncFlowUi();
-
-#ifdef Q_OS_ANDROID
-    showMaximized();
-#endif
 }
 
 void MainWindow::buildDesktopLayout(QWidget *central, QVBoxLayout *layout)
@@ -423,10 +437,12 @@ void MainWindow::buildAndroidLayout(QWidget *central, QVBoxLayout *rootLayout)
     m_preview->setCornerRadius(14);
     m_preview->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_preview->setMinimumHeight(0);
+    m_preview->setMinimumWidth(0);
     previewLayout->addWidget(m_preview, 1);
 
     m_scrollArea = new QScrollArea(m_bodyWidget);
     m_scrollArea->setWidgetResizable(true);
+    m_scrollArea->viewport()->installEventFilter(this);
     m_scrollArea->setFrameShape(QFrame::NoFrame);
     m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scrollArea->setStyleSheet(QStringLiteral(
@@ -476,6 +492,8 @@ void MainWindow::buildAndroidLayout(QWidget *central, QVBoxLayout *rootLayout)
     fileTextLayout->setContentsMargins(0, 0, 0, 0);
     fileTextLayout->setSpacing(2);
     m_fileNameLabel = new QLabel(fileTexts);
+    // The elided text must not become a minimum width on the next layout pass.
+    m_fileNameLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_fileNameLabel->setStyleSheet(QStringLiteral("color: #202124; font-weight: 600; font-size: 14px;"));
     m_fileMetaLabel = new QLabel(fileTexts);
     m_fileMetaLabel->setStyleSheet(QStringLiteral("color: #6B6B6B; font-size: 13px;"));
@@ -497,6 +515,7 @@ void MainWindow::buildAndroidLayout(QWidget *central, QVBoxLayout *rootLayout)
     m_stepConnectorLabel = new QLabel(QStringLiteral("────────"), m_stepperWidget);
     m_stepConnectorLabel->setStyleSheet(QStringLiteral("color: #C4C7C5;"));
     m_stepConnectorLabel->setAlignment(Qt::AlignCenter);
+    m_stepConnectorLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_stepAreaLabel = new QLabel(m_stepperWidget);
     m_stepAreaLabel->setStyleSheet(QStringLiteral("color: #6B6B6B; font-weight: 600; font-size: 13px;"));
     stepRow->addWidget(m_stepFileLabel, 0);
@@ -576,6 +595,7 @@ void MainWindow::buildAndroidLayout(QWidget *central, QVBoxLayout *rootLayout)
 
     m_accessibilityChip = new QLabel(m_scrollContent);
     m_accessibilityChip->setText(tr("Accessibility service active"));
+    m_accessibilityChip->setWordWrap(true);
     m_accessibilityChip->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     m_accessibilityChip->setStyleSheet(QStringLiteral(
         "QLabel {"
@@ -679,7 +699,9 @@ void MainWindow::buildAndroidLayout(QWidget *central, QVBoxLayout *rootLayout)
     m_stopButton = new QPushButton(tr("Stop"), central);
     m_stopButton->hide();
 
-    applyAndroidOrientationLayout();
+    // QWidget's pre-show size is provisional (usually landscape). Start with
+    // one column; choose the orientation once the native window is laid out.
+    applyAndroidOrientationLayout(QSize());
     updateAndroidChrome();
 }
 
@@ -796,8 +818,7 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
     if (m_androidUi) {
-        applyAndroidOrientationLayout();
-        updateAndroidChrome();
+        scheduleAndroidLayoutUpdate();
     }
     if (m_aboutOverlay)
         m_aboutOverlay->setGeometry(rect());
@@ -812,6 +833,7 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 void MainWindow::showEvent(QShowEvent *event)
 {
     QMainWindow::showEvent(event);
+    scheduleAndroidLayoutUpdate();
 #ifdef AUTOGRAFO_ENABLE_ADS
     AutografoAds::setBannerVisible(true);
 #endif
@@ -836,6 +858,12 @@ void MainWindow::hideEvent(QHideEvent *event)
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
+    if (m_androidUi
+        && (event->type() == QEvent::Resize || event->type() == QEvent::ContentsRectChange)
+        && (watched == centralWidget()
+            || (m_scrollArea && watched == m_scrollArea->viewport()))) {
+        scheduleAndroidLayoutUpdate();
+    }
     if (watched == m_overflowScrim
         && (event->type() == QEvent::MouseButtonPress
             || event->type() == QEvent::MouseButtonRelease)) {
@@ -1527,6 +1555,7 @@ void MainWindow::acceptAccessibilityDisclosure()
 void MainWindow::onApplicationStateChanged(Qt::ApplicationState state)
 {
     if (state == Qt::ApplicationActive) {
+        scheduleAndroidLayoutUpdate();
         installAppTranslations();
         // After overlay/drawing workflows the window may stay hidden in the
         // background; restore it when the user opens Autograph again.
@@ -1609,12 +1638,30 @@ void MainWindow::updateAndroidChrome()
     }
 }
 
-void MainWindow::applyAndroidOrientationLayout()
+void MainWindow::scheduleAndroidLayoutUpdate()
+{
+    if (!m_androidUi || m_androidLayoutUpdatePending)
+        return;
+    m_androidLayoutUpdatePending = true;
+    QTimer::singleShot(0, this, [this]() {
+        if (isVisible() && centralWidget()) {
+            // Read the content bounds after Qt has processed the native resize
+            // and safe-area margins, rather than inside the parent's resize.
+            applyAndroidOrientationLayout(centralWidget()->contentsRect().size());
+            updateAndroidChrome();
+            updatePreviewHeightLimit();
+            updateFileRowText();
+        }
+        m_androidLayoutUpdatePending = false;
+    });
+}
+
+void MainWindow::applyAndroidOrientationLayout(const QSize &availableSize)
 {
     if (!m_androidUi || !m_bodyGrid || !m_previewContainer || !m_scrollArea || !m_footerWidget)
         return;
 
-    const bool landscape = width() > height();
+    const bool landscape = availableSize.width() > availableSize.height();
     if (landscape == m_androidLandscape && m_bodyGrid->count() > 0)
         return;
     m_androidLandscape = landscape;
